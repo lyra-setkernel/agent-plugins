@@ -947,7 +947,10 @@ cat >"$rstub/gh" <<EOF
 echo "\$*" >>"$rs/calls"
 case "\$*" in
   "api user --jq .login") echo zz-me ;;
-  "api --paginate orgs/setkernel/teams/engineering/members --jq .[].login") printf '%s\n' zz-author zz-me realRaghavGupta zz-a zz-b zz-c ;;
+  "api --paginate orgs/setkernel/teams/seats/members --jq .[].login")
+    [ -f "$rs/noteam" ] && { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    [ -f "$rs/noscope" ] && { echo "gh: Resource not accessible (HTTP 403)" >&2; exit 1; }
+    printf '%s\n' zz-author zz-me realRaghavGupta zz-a zz-b zz-c ;;
   "api repos/example/app/pulls/1") cat "$rs/pr.json" ;;
   "api repos/example/app/pulls/1/requested_reviewers --jq .users[].login") cat "$rs/requested" ;;
   *" search/issues "*) l=\${*##*review-requested:}; l=\${l%% *}; cat "$rs/load-\$l" 2>/dev/null || echo 0 ;;
@@ -976,7 +979,7 @@ rr_pr open false ''
 expect 0 "^Review requested from zz-b zz-c on https://github.com/example/app/pull/1; labelled agent-review.$" \
   "request-review asks the two least busy seats and prints them with the PR URL" -- rr_run
 expect 0 "^none$" "the author, the caller and Raghav are neither counted nor asked" -- \
-  sh -c "grep -E 'zz-author|zz-me|realRaghavGupta' '$rs/calls' | grep -v 'teams/engineering' || echo none"
+  sh -c "grep -E 'zz-author|zz-me|realRaghavGupta' '$rs/calls' | grep -v 'teams/seats' || echo none"
 expect 0 "^2$" "one POST per seat" -- posts pulls/1/requested_reviewers
 expect 0 "^0$" "each POST carries one login" -- sh -c "grep -c 'reviewers\[\]=.*reviewers\[\]=' '$rs/calls' || true"
 expect 0 "^label last$" "the label comes after the reviewers" -- \
@@ -1003,6 +1006,11 @@ rr_refuses open true '' "is a draft"
 rr_refuses open false '{"name":"human"}' "is labelled human"
 rr_pr open false ''
 expect 1 "refused inside an sk-agent run: sk-agent asks its own peers" "request-review refuses inside an sk-agent run" -- rr_run SETKERNEL_GUARD_NO_PUSH=1
+rr_pr open false '' && : >"$rs/noteam"
+expect 1 "the team setkernel/seats does not exist" "a missing team is named as missing" -- rr_run
+rr_pr open false '' && : >"$rs/noscope"
+expect 1 "cannot list the members of setkernel/seats: gh: Resource not accessible" "another failure keeps gh's own message" -- rr_run
+rr_pr open false ''
 expect 1 "not an owner/repo" "and a malformed repo" -- env PATH="$rstub:$PATH" $sh_cmd "$rr" 'example/app/x' 1
 
 rr_pr open false '' && printf '%s\n' zz-c zz-a >"$rs/requested"

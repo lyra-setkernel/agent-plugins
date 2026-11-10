@@ -6,7 +6,7 @@
 # the PR isn't labelled `human`. sk-agent asks peers only for the PRs it opens, so this does the same
 # for a person's PR: reviewers first, the label last, as sk-agent does.
 #
-# Candidates: the org team's members, minus the PR author, the caller and Raghav, least busy first
+# Candidates: the members of team seats, minus the PR author, the caller and Raghav, least busy first
 # (open review requests in the org), random among ties. One REST call per login; a refused login is
 # skipped; a login GitHub dropped (read back after each call) is asked once more. A seat is a team
 # member other than Raghav or the author who is a requested reviewer. With two seats on the PR the
@@ -14,7 +14,7 @@
 # label, exit 1. It never approves, merges, comments or edits the PR body. POSIX sh, gh and jq only.
 set -u
 org=setkernel
-team=engineering
+team=seats
 owner=realRaghavGupta
 label=agent-review
 want=2
@@ -46,11 +46,17 @@ printf '%s' "$pr" | jq -e '[.labels[].name] | index("human")' >/dev/null &&
   die "$url is labelled human: agents don't review it."
 
 me=$(gh api user --jq .login) && [ -n "$me" ] || die "cannot tell who is calling (gh api user)."
-members=$(gh api --paginate "orgs/$org/teams/$team/members" --jq '.[].login') && [ -n "$members" ] ||
-  die "cannot list the members of $org/$team (the gh login needs read:org)."
-
 tmpd=$(mktemp -d) || die "mktemp failed"
 trap 'rm -rf "$tmpd"' EXIT
+# A 404 here means the team is missing (or hidden from this login), not a short scope: say which.
+if members=$(gh api --paginate "orgs/$org/teams/$team/members" --jq '.[].login' 2>"$tmpd/err"); then
+  [ -n "$members" ] || die "the team $org/$team has no members."
+else
+  if grep -q 'HTTP 404' "$tmpd/err"; then
+    die "the team $org/$team does not exist (or this gh login cannot see it): $(cat "$tmpd/err")"
+  fi
+  die "cannot list the members of $org/$team: $(cat "$tmpd/err")"
+fi
 # pool: the logins that count as seats. requested: the logins now requested on the PR.
 printf '%s\n' "$members" | grep -Fvx -e "$owner" -e "$author" >"$tmpd/pool"
 requested() { gh api "repos/$repo/pulls/$num/requested_reviewers" --jq '.users[].login'; }
